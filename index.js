@@ -25,7 +25,7 @@ function createConvolverDetector(context, input, freq, callback) {
   input.connect(cosineConvolver);
   var bufferSize = 1024;
   processor = context.createScriptProcessor(bufferSize, 2, 1);
-  var threshold = 0.005;
+  var threshold = 0.001;
   //	require C consecutive samples above threshold to trigger
   var C = 10;
   var debounceWindow = 100;
