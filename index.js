@@ -28,7 +28,7 @@ function createConvolverDetector(context, input, freq, callback) {
   var threshold = 0.003;
   //	require C consecutive samples above threshold to trigger
   var C = 5;
-  var debounceWindow = 100;
+  var debounceWindow = 4000;
   var lastDetection = 0;
   var detectionCount = 0;
   
@@ -51,33 +51,33 @@ function createConvolverDetector(context, input, freq, callback) {
 
   var previousBuffer = context.createBuffer(1, bufferSize, 44100);
   var inputData = context.createBuffer(1, bufferSize, 44100);
+  var t = 0;
   var c = 0;
   processor.onaudioprocess = function(e) {
-    if (Date.now() > lastDetection + debounceWindow) {
-      var sineData = e.inputBuffer.getChannelData(0);
-      var cosineData = e.inputBuffer.getChannelData(0);
-      var max = -1;
+	  var sineData = e.inputBuffer.getChannelData(0);
+	  var cosineData = e.inputBuffer.getChannelData(0);
+	  var max = -1;
 	  // consecutive samples above threshold
-      for (var i = 0; i < bufferSize; i++) {
-		inputData[i] = Math.sqrt(sineData[i]*sineData[i] + cosineData[i]*cosineData[i]);
-		if (inputData[i] > max) {
-			max = inputData[i];
-		}
-		if ((Date.now() > lastDetection + debounceWindow) && inputData[i] > threshold) {
-			c++;
-			if (c >= C) {
-				c = 0;
-				lastDetection = Date.now();
-				log('Saw ' + freq);
-				callback();
-			}
-		} else {
-			c = 0;
-		}
-		previousBuffer[i] = inputData[i];
-      }
-      maxOutput.innerHTML = max;
-    }
+	  for (var i = 0; i < bufferSize; i++) {
+		  inputData[i] = Math.sqrt(sineData[i]*sineData[i] + cosineData[i]*cosineData[i]);
+		  if (inputData[i] > max) {
+			  max = inputData[i];
+		  }
+		  if ((t > lastDetection + debounceWindow) && inputData[i] > threshold) {
+			  c++;
+		  } else {
+			  if (c >= C) {
+				  var chirpMiddle = (t - 1 - c/2);
+				  lastDetection = chirpMiddle - (emitPeriods * 44100 / (44100/2.3));
+				  log('Saw ' + freq + ' at ' + (lastDetection / 44100));
+				  callback();
+			  }
+			  c = 0;
+		  }
+		  previousBuffer[i] = inputData[i];
+		  t++;
+	  }
+	  maxOutput.innerHTML = max;
   };
   var merger = context.createChannelMerger(2);
   sineConvolver.connect(merger, 0, 0);
