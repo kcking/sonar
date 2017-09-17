@@ -1,4 +1,4 @@
-function makeConvolutionBuffer(audioContext, periods, freq) {
+function makeConvolutionBuffer(audioContext, periods, freq, sampFn) {
   var sampleRate = audioContext.sampleRate;
   var samples = periods*sampleRate/freq;
   var buffer = audioContext.createBuffer(1, samples, sampleRate);
@@ -6,22 +6,28 @@ function makeConvolutionBuffer(audioContext, periods, freq) {
 
   var sampleToRadians = freq * 2 * Math.PI / sampleRate;
   for (var i = 0; i < samples; i++){
-      channelL[i] = Math.sin(i * sampleToRadians);
+      channelL[i] = sampFn(i * sampleToRadians);
   }
 
   return buffer;
 }
 
 function createConvolverDetector(context, input, freq, callback) {
-  var convolver = context.createConvolver();
-  convolver.normalize = true;
   var convolvePeriods = 100;
   var emitPeriods = 100;
-  convolver.buffer = makeConvolutionBuffer(context, convolvePeriods, freq);
-  input.connect(convolver);
+  var sineConvolver = context.createConvolver();
+  sineConvolver.normalize = true;
+  sineConvolver.buffer = makeConvolutionBuffer(context, convolvePeriods, freq, Math.sin);
+  input.connect(sineConvolver);
+  var cosineConvolver = context.createConvolver();
+  cosineConvolver.normalize = true;
+  cosineConvolver.buffer = makeConvolutionBuffer(context, convolvePeriods, freq, Math.cos);
+  input.connect(cosineConvolver);
   var bufferSize = 1024;
-  processor = context.createScriptProcessor(bufferSize, 1, 1);
-  var threshold = 0.002;
+  processor = context.createScriptProcessor(bufferSize, 2, 1);
+  var threshold = 0.005;
+  //	require C consecutive samples above threshold to trigger
+  var C = 10;
   var debounceWindow = 100;
   var lastDetection = 0;
   var detectionCount = 0;
@@ -31,40 +37,52 @@ function createConvolverDetector(context, input, freq, callback) {
   button.innerHTML = freq;
   button.onclick = function() {
     var source = context.createBufferSource();
-    source.buffer = makeConvolutionBuffer(context, emitPeriods, freq);
+    source.buffer = makeConvolutionBuffer(context, emitPeriods, freq, Math.sin);
     source.connect(context.destination);
     source.start();
     setTimeout(function() {
       source.disconnect();
-    }, emitDuration * 1000);
+    }, 3000);
   };
   wrapper.appendChild(button);
   var maxOutput = document.createElement('span');
   wrapper.appendChild(maxOutput);
   document.getElementById('detectors').appendChild(wrapper);
 
+  var previousBuffer = context.createBuffer(1, bufferSize, 44100);
+  var inputData = context.createBuffer(1, bufferSize, 44100);
+  var c = 0;
   processor.onaudioprocess = function(e) {
     if (Date.now() > lastDetection + debounceWindow) {
-      var inputData = e.inputBuffer.getChannelData(0);
+      var sineData = e.inputBuffer.getChannelData(0);
+      var cosineData = e.inputBuffer.getChannelData(0);
       var max = -1;
+	  // consecutive samples above threshold
       for (var i = 0; i < bufferSize; i++) {
-        if (inputData[i] > max) max = inputData[i];
-        
+		inputData[i] = Math.sqrt(sineData[i]*sineData[i] + cosineData[i]*cosineData[i]);
+		if (inputData[i] > max) {
+			max = inputData[i];
+		}
+		if ((Date.now() > lastDetection + debounceWindow) && inputData[i] > threshold) {
+			c++;
+			if (c >= C) {
+				c = 0;
+				lastDetection = Date.now();
+				log('Saw ' + freq);
+				callback();
+			}
+		} else {
+			c = 0;
+		}
+		previousBuffer[i] = inputData[i];
       }
       maxOutput.innerHTML = max;
-      if (max > threshold) {
-        detectionCount++;
-        if (detectionCount > 0) {
-          lastDetection = Date.now();
-          log('Saw ' + freq);
-          callback();
-        }
-      } else {
-        detectionCount = 0;
-      }
     }
   };
-  convolver.connect(processor);
+  var merger = context.createChannelMerger(2);
+  sineConvolver.connect(merger, 0, 0);
+  cosineConvolver.connect(merger, 0, 1);
+  merger.connect(processor);
   processor.connect(context.destination);
 }
 
@@ -86,7 +104,7 @@ var handleSuccess = function(stream) {
 	createConvolverDetector(context, input, 44100/2.3, function() {});
   clearButton();
   
-  input.connect(analyser);
+  //input.connect(analyser);
   
   analyser.fftSize = 2048;
   var bufferLength = analyser.frequencyBinCount;
