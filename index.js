@@ -25,9 +25,9 @@ function createConvolverDetector(context, input, freq, callback) {
   input.connect(cosineConvolver);
   var bufferSize = 1024;
   processor = context.createScriptProcessor(bufferSize, 2, 1);
-  var threshold = 0.001;
+  var threshold = 0.003;
   //	require C consecutive samples above threshold to trigger
-  var C = 10;
+  var C = 5;
   var debounceWindow = 100;
   var lastDetection = 0;
   var detectionCount = 0;
@@ -95,9 +95,8 @@ function clearButton() {
   document.getElementById('clear').onclick = function() { document.getElementById('log').innerHTML = ''; };
 }
 
-var handleSuccess = function(stream) {
-  var context = new AudioContext();
-  var input = context.createMediaStreamSource(stream);
+var context = new AudioContext();
+var handleSuccess = function(input) {
 	var analyser = context.createAnalyser();
 
 	createConvolverDetector(context, input, 44100/2.2, function() {});
@@ -166,4 +165,62 @@ var handleSuccess = function(stream) {
   draw();
 };
 
-navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(handleSuccess);
+document.addEventListener("DOMContentLoaded", function(event) {
+	document.getElementById("positive-button").onclick = function() {
+		var request = new XMLHttpRequest();
+		request.open('GET', "positive_full.ogg", true);
+		request.responseType = 'arraybuffer';
+
+		request.onload = function() {
+			context.decodeAudioData(request.response, function(buffer) {
+				var bufferSource = context.createBufferSource();
+				bufferSource.buffer = buffer;
+				bufferSource.start();
+				bufferSource.loop = true;
+				handleSuccess(bufferSource);
+			});
+		}
+		request.send();
+	};
+
+	document.getElementById("positive-small-button").onclick = function() {
+		var request = new XMLHttpRequest();
+		request.open('GET', "positive_small.ogg", true);
+		request.responseType = 'arraybuffer';
+
+		request.onload = function() {
+			context.decodeAudioData(request.response, function(buffer) {
+				var bufferSource = context.createBufferSource();
+				bufferSource.buffer = buffer;
+				bufferSource.start();
+				bufferSource.loop = true;
+				handleSuccess(bufferSource);
+			});
+		}
+		request.send();
+	};
+
+	document.getElementById("negative-button").onclick = function() {
+		var request = new XMLHttpRequest();
+		request.open('GET', "negative_full.ogg", true);
+		request.responseType = 'arraybuffer';
+
+		request.onload = function() {
+			context.decodeAudioData(request.response, function(buffer) {
+				var bufferSource = context.createBufferSource();
+				bufferSource.buffer = buffer;
+				bufferSource.start();
+				handleSuccess(bufferSource);
+			});
+		}
+		request.send();
+	};
+
+	document.getElementById("mic-button").onclick = function() {
+		navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(function(s) {
+			var input = context.createMediaStreamSource(s);
+			handleSuccess(input);
+		});
+	};
+});
+
