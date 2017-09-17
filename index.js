@@ -27,7 +27,7 @@ function createConvolverDetector(context, input, freq, callback) {
   cosineConvolver.normalize = true;
   cosineConvolver.buffer = makeConvolutionBuffer(context, convolvePeriods, freq, Math.cos);
   input.connect(cosineConvolver);
-  var bufferSize = 1024;
+  var bufferSize = 256;
   processor = context.createScriptProcessor(bufferSize, 2, 1);
   var threshold = 0.003;
   //	require C consecutive samples above threshold to trigger
@@ -113,7 +113,7 @@ var handleSuccess = function(input) {
 	createConvolverDetector(context, input, 44100/2.3, onChirpHeard);
   clearButton();
   
-  //input.connect(analyser);
+  input.connect(analyser);
   
   analyser.fftSize = 2048;
   var bufferLength = analyser.frequencyBinCount;
@@ -228,18 +228,73 @@ document.addEventListener("DOMContentLoaded", function(event) {
 
 	document.getElementById("mic-button").onclick = function() {
 		navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(function(s) {
+			state = MEASURE_SELF_LATENCY;
 			var input = context.createMediaStreamSource(s);
 			handleSuccess(input);
 			selfChirp();
 		});
 	};
+
+	document.getElementById("send-button").onclick = function() {
+		if (state == WAITING) {
+			state = SENDER;
+		}
+	};
+
+	document.getElementById("receive-button").onclick = function() {
+		if (state == WAITING) {
+			selfChirp();
+			state = RECEIVER_SELF_CHIRP;
+		}
+	};
 });
 
+var MEASURE_SELF_LATENCY = "measure-self-latency";
+var WAITING = "waiting";
+
+var RECEIVER_SELF_CHIRP = "receiver-self-chirp";
+var RECEIVER_LISTEN = "receiver-listen";
+
+var SENDER = "sender";
+var state = WAITING;
+var selfLatencies = [];
+var selfLatency = null;
 function onChirpHeard(atT) {
-	log('self latency ' + (atT - chirpAtT));
-	selfChirp();
+	if (state == MEASURE_SELF_LATENCY) {
+		if (atT - chirpAtT < 0 || atT - chirpAtT > 10000) {
+			// ignore
+			return;
+		}
+		var latency = atT - chirpAtT;
+		log('self latency ' + latency);
+		selfLatencies.push(latency);
+		if (selfLatencies.length == 5) {
+			selfLatency = selfLatencies.sort()[2];
+			log('final self latency ' + selfLatency);
+			state = WAITING;
+		} else {
+			selfChirp();
+		}
+	} else if (state == RECEIVER_SELF_CHIRP) {
+		state = RECEIVER_LISTEN;
+	} else if (state == RECEIVER_LISTEN) {
+		var rttSamples = (atT - chirpAtT) - 44100; // 1 sec pause
+		//FIXME: for now assume device latencies are equal
+		var rttTime = (rttSamples - selfLatency * 2) / 44100;
+		log(rttTime * 343 + ' meters');
+	} else if (state == SENDER) {
+		chirpAtT = t + 44100;
+	}
 }
 
 function selfChirp() {
 	chirpAtT = t + 44100*.1;
 }
+
+navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(function(s) {
+	state = MEASURE_SELF_LATENCY;
+	var input = context.createMediaStreamSource(s);
+	handleSuccess(input);
+	selfChirp();
+});
+
