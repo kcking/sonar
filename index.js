@@ -12,11 +12,15 @@ function makeConvolutionBuffer(audioContext, periods, freq, sampFn) {
   return buffer;
 }
 
+var chirpAtT = null;
+var t = 0;
+
 function createConvolverDetector(context, input, freq, callback) {
   var convolvePeriods = 100;
   var emitPeriods = 100;
   var sineConvolver = context.createConvolver();
   sineConvolver.normalize = true;
+  var chirpBuffer = makeConvolutionBuffer(context, emitPeriods, freq, Math.sin);
   sineConvolver.buffer = makeConvolutionBuffer(context, convolvePeriods, freq, Math.sin);
   input.connect(sineConvolver);
   var cosineConvolver = context.createConvolver();
@@ -27,8 +31,8 @@ function createConvolverDetector(context, input, freq, callback) {
   processor = context.createScriptProcessor(bufferSize, 2, 1);
   var threshold = 0.003;
   //	require C consecutive samples above threshold to trigger
-  var C = 5;
-  var debounceWindow = 4000;
+  var C = 20;
+  var debounceWindow = 2000;
   var lastDetection = 0;
   var detectionCount = 0;
   
@@ -51,11 +55,12 @@ function createConvolverDetector(context, input, freq, callback) {
 
   var previousBuffer = context.createBuffer(1, bufferSize, 44100);
   var inputData = context.createBuffer(1, bufferSize, 44100);
-  var t = 0;
+  //var t = 0;
   var c = 0;
   processor.onaudioprocess = function(e) {
 	  var sineData = e.inputBuffer.getChannelData(0);
-	  var cosineData = e.inputBuffer.getChannelData(0);
+	  var cosineData = e.inputBuffer.getChannelData(1);
+	  var outputData = e.outputBuffer.getChannelData(0);
 	  var max = -1;
 	  // consecutive samples above threshold
 	  for (var i = 0; i < bufferSize; i++) {
@@ -68,13 +73,18 @@ function createConvolverDetector(context, input, freq, callback) {
 		  } else {
 			  if (c >= C) {
 				  var chirpMiddle = (t - 1 - c/2);
-				  lastDetection = chirpMiddle - (emitPeriods * 44100 / (44100/2.3));
+				  lastDetection = chirpMiddle - (emitPeriods * 44100 / freq);
 				  log('Saw ' + freq + ' at ' + (lastDetection / 44100));
-				  callback();
+				  callback(lastDetection);
 			  }
 			  c = 0;
 		  }
 		  previousBuffer[i] = inputData[i];
+		  if (chirpAtT != null && (t - chirpAtT >= 0) && ((t - chirpAtT) < chirpBuffer.length)) {
+			  outputData[i] = chirpBuffer.getChannelData(0)[t - chirpAtT];
+		  } else {
+			  outputData[i] = 0;
+		  }
 		  t++;
 	  }
 	  maxOutput.innerHTML = max;
@@ -99,8 +109,8 @@ var context = new AudioContext();
 var handleSuccess = function(input) {
 	var analyser = context.createAnalyser();
 
-	createConvolverDetector(context, input, 44100/2.2, function() {});
-	createConvolverDetector(context, input, 44100/2.3, function() {});
+	//createConvolverDetector(context, input, 44100/2.2, function() {});
+	createConvolverDetector(context, input, 44100/2.3, onChirpHeard);
   clearButton();
   
   //input.connect(analyser);
@@ -220,7 +230,16 @@ document.addEventListener("DOMContentLoaded", function(event) {
 		navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(function(s) {
 			var input = context.createMediaStreamSource(s);
 			handleSuccess(input);
+			selfChirp();
 		});
 	};
 });
 
+function onChirpHeard(atT) {
+	log('self latency ' + (atT - chirpAtT));
+	selfChirp();
+}
+
+function selfChirp() {
+	chirpAtT = t + 44100*.1;
+}
